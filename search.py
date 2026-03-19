@@ -1,15 +1,8 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
+import numpy as np
+import torch
 import faiss
 from sklearn.preprocessing import normalize
 from coffee_embeddings import mean_pooling
-
-
-# In[ ]:
 
 
 def build_faiss_index(product_embeddings: np.ndarray) -> faiss.Index:
@@ -45,15 +38,6 @@ def search(query: str, tokenizer, model, index: faiss.Index,
 
     return results
 
-
-# In[2]:
-
-
-import os
-print(os.getcwd())
-
-
-# In[ ]:
 
 
 

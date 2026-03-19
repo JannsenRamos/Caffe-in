@@ -1,90 +1,9 @@
-#!/usr/bin/env python
-# coding: utf-8
+import re
+import unicodedata
 
-# In[1]:
-
-
-import pandas as pd
 import numpy as np
-import matplotlib as plt
-
-
-# In[2]:
-
-
-filepath = r"C:\Users\Lenovo\Documents\GitHub\Coffee_Reco_System\data\raw\coffee_reviewsV2.csv"
-kaggle_filepath= r"C:\Users\Lenovo\Documents\GitHub\Coffee_Reco_System\data\raw\kaggle_coffee_analysis.csv"
-
-
-# In[3]:
-
-
-df = pd.read_csv(filepath)
-
-
-# In[4]:
-
-
-df.head(5)
-
-
-# In[5]:
-
-
-counts = df.groupby('coffee_name')['review'].size()
-print("Max reviews: ",counts.max())
-print("Max reviews: ",counts.min())
-print("Coffees with only 1 review: ", (counts == 1).sum())
-
-
-# In[6]:
-
-
-df.groupby('coffee_name').size().describe()
-
-
-# In[7]:
-
-
-reviews = df.groupby('coffee_name').size()
-print("Coffee with 1 review:", (reviews == 1).sum())
-print("Coffee with 3 reviews:", (reviews >= 3).sum())
-print("Coffee with over 5 reviews:", (reviews >= 5).sum())
-
-
-# In[8]:
-
-
-print(df.shape)
-print(df['coffee_name'].nunique())
-
-
-# In[9]:
-
-
-kaggle_df = pd.read_csv(r"C:\Users\Lenovo\Documents\GitHub\Coffee_Reco_System\data\raw\kaggle_coffee_analysis.csv")
-
-
-# In[10]:
-
-
-overlap = set(df['coffee_name'].str.lower().str.strip()) & set(kaggle_df['name'].str.lower().str.strip())
-print(len(overlap))
-
-
-# In[11]:
-
-
-kaggle_df = pd.read_csv(kaggle_filepath)
-print(kaggle_df.columns.tolist())
-print(kaggle_df.head(2))
-kaggle_df.shape[0]
-
-
-# In[12]:
-
-
 import pandas as pd
+
 
 def load_data(filepath: str) -> pd.DataFrame:
     df = pd.read_csv(filepath)
@@ -137,10 +56,6 @@ def filter_by_review_density(df: pd.DataFrame, min_reviews: int = 3) -> pd.DataF
 
     return filtered_df
 
-
-# In[13]:
-
-
 def normalize_name(df: pd.DataFrame) -> pd.DataFrame:
     df["coffee_name"] = (
         df["coffee_name"]
@@ -151,19 +66,12 @@ def normalize_name(df: pd.DataFrame) -> pd.DataFrame:
     )
     return df
 
-
-# In[27]:
-
-
 def apply_text_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     df["review"] = df["review"].apply(clean_text)
     return df
 
 
-# In[39]:
 
-
-import re
 def clean_text(review: str):
     if review is None or pd.isna(review):
         return ""
@@ -172,9 +80,6 @@ def clean_text(review: str):
         review = review.strip()
         review = re.sub(r"\s+", " ", review).strip()
         return review
-
-
-# In[40]:
 
 
 def build_pipeline(filepath: str, kaggle_filepath: str) -> pd.DataFrame:
@@ -198,78 +103,6 @@ def build_pipeline(filepath: str, kaggle_filepath: str) -> pd.DataFrame:
 
     return filtered_df
 
-
-# In[41]:
-
-
-final_df = build_pipeline(filepath, kaggle_filepath)
-print(final_df.shape)
-print(final_df["coffee_name"].nunique())
-print(final_df.groupby("coffee_name").size().describe())
-
-
-# In[42]:
-
-
-final_df = final_df.drop(columns=["url", "review_date"])
-final_df["score"] = pd.to_numeric(final_df["score"], errors="coerce")
-final_df["roast_level"] = final_df["roast_level"].fillna("Unknown")
-
-
-# In[43]:
-
-
-print(final_df.isnull().sum())
-print(final_df.dtypes)
-print(final_df["roast_level"].value_counts())
-
-
-# In[44]:
-
-
-final_df.to_parquet("coffee_clean.parquet", index=False)
-
-
-# In[45]:
-
-
-final_df["review_length"] = final_df["review"].str.split().str.len()
-print(final_df["review_length"].describe())
-
-
-# In[46]:
-
-
-import re
-
-# check for HTML artifacts
-print(final_df["review"].str.contains(r"<.*?>", regex=True).sum())
-
-# check for URLs
-print(final_df["review"].str.contains(r"http", regex=True).sum())
-
-# check for excessive punctuation or special characters
-print(final_df["review"].str.contains(r"[^a-zA-Z0-9\s,.\-']", regex=True).sum())
-
-# show samples of reviews with special characters
-mask = final_df["review"].str.contains(r"[^a-zA-Z0-9\s,.\-']", regex=True)
-print(final_df[mask]["review"].head(10).values)
-
-
-# In[47]:
-
-
-final_df = build_pipeline(filepath, kaggle_filepath)
-print(final_df["review"].head(5).values)
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
 
 
 
