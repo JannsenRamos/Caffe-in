@@ -18,13 +18,13 @@ def search(query: str, tokenizer, model, index: faiss.Index,
            coffee_names: np.ndarray, variance_scores: np.ndarray, 
            top_k: int = 5) -> list:
 
-    encoded = tokenizer(query, return_tensors="pt")
+    encoded = tokenizer([query], return_tensors="pt")
     with torch.no_grad():
         outputs = model(**encoded)
 
     query_embedding = mean_pooling(outputs, encoded["attention_mask"])
 
-    query_vector = normalize(query_embedding, norm="l2")
+    query_vector = normalize(query_embedding.numpy(), norm="l2")
 
     distances, indices = index.search(query_vector, top_k)
 
