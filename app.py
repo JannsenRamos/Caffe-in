@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import numpy as np
 import pandas as pd
-from embeddings import load_model
+from coffee_embeddings import load_model
 from search import build_faiss_index, search
 
 app = FastAPI()
@@ -10,9 +10,9 @@ app = FastAPI()
 # load artifacts and model once at startup
 tokenizer, model = load_model()
 index = build_faiss_index(np.load("dataset/product_embeddings.npy"))
-coffee_names = np.load("dataset/coffee_names.npy")
+coffee_names = np.load("dataset/coffee_names.npy", allow_pickle=True)
 variance_scores = np.load("dataset/variance_scores.npy")
-df = pd.read_csv("dataset/coffee_reviewsV2.csv")
+df = pd.read_parquet("dataset/coffee_clean.parquet")
 
 class SearchRequest(BaseModel):
     query: str

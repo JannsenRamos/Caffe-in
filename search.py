@@ -31,9 +31,9 @@ def search(query: str, tokenizer, model, index: faiss.Index,
     results = []
     for i, idx in enumerate(indices[0]):
         results.append({
-            "name": coffee_names[idx],
-            "variance": variance_scores[idx],
-            "score": distances[0][i]
+            "name": str(coffee_names[idx]),
+            "variance": float(variance_scores[idx]),
+            "score": float(distances[0][i])
         })
 
     return results
