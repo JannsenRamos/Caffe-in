@@ -56,6 +56,17 @@ section[data-testid="stSidebar"] .stTextInput label {
     color: var(--caramel) !important;
 }
 
+/* ── Sidebar Legend — white text on dark sidebar ── */
+section[data-testid="stSidebar"] .legend-box {
+    color: #FFFFFF !important;
+}
+section[data-testid="stSidebar"] .legend-box strong {
+    color: #FFFFFF !important;
+}
+section[data-testid="stSidebar"] .legend-box em {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+
 /* ── Header ── */
 .caffe-header {
     padding: 2rem 0 1rem;
@@ -159,15 +170,16 @@ section[data-testid="stSidebar"] .stTextInput label {
 
 /* ── Legend ── */
 .legend-box {
-    background: var(--cream);
+    background: rgba(59, 31, 14, 0.6);
+    border: 1px solid var(--caramel);
     border-radius: 8px;
     padding: 1rem 1.2rem;
     margin-top: 1.5rem;
     font-size: 0.82rem;
     line-height: 1.8;
-    color: var(--roast);
+    color: #FFFFFF;
 }
-.legend-box strong { color: var(--espresso); }
+.legend-box strong { color: #FFFFFF; }
 
 /* ── Empty state ── */
 .empty-state {
@@ -195,16 +207,20 @@ section[data-testid="stSidebar"] .stTextInput label {
 # ── Helpers ────────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Warming up the grinder...")
 def load_resources():
-    tokenizer, model = load_model()
-    product_embeddings = np.load("dataset/product_embeddings.npy")
-    index = build_faiss_index(product_embeddings)
-    coffee_names   = np.load("dataset/coffee_names.npy",   allow_pickle=True)
-    variance_scores = np.load("dataset/variance_scores.npy")
-    df = pd.read_parquet("dataset/coffee_clean.parquet")
-    return tokenizer, model, index, coffee_names, variance_scores, df
+    try:
+        tokenizer, model = load_model()
+        product_embeddings = np.load("dataset/product_embeddings.npy")
+        index = build_faiss_index(product_embeddings)
+        coffee_names   = np.load("dataset/coffee_names.npy",   allow_pickle=True)
+        variance_scores = np.load("dataset/variance_scores.npy")
+        df = pd.read_parquet("dataset/coffee_clean.parquet")
+        return tokenizer, model, index, coffee_names, variance_scores, df
+    except Exception as e:
+        st.error(f"Failed to load resources: {e}")
+        st.stop()
 
 
-def get_risk_label(variance: float):
+def get_risk_label(variance: float) -> tuple[str, str, str]:
     if variance < 0.030:
         return "Low Risk",  "low",  "🟢 Consistent & predictable"
     elif variance < 0.060:
@@ -222,10 +238,63 @@ def get_top_review(df: pd.DataFrame, coffee_name: str) -> str:
     return review[:220] + "..." if len(review) > 220 else review
 
 
+def run_search(query: str, roast_level: str, top_k: int,
+               tokenizer, model, index, coffee_names, variance_scores, df) -> list:
+    """Run search and return enriched results."""
+    fetch_k = top_k * 3 if roast_level != "All" else top_k
+
+    try:
+        raw_results = search(
+            query=query,
+            tokenizer=tokenizer,
+            model=model,
+            index=index,
+            coffee_names=coffee_names,
+            variance_scores=variance_scores,
+            top_k=fetch_k,
+        )
+    except Exception as e:
+        st.error(f"Search failed: {e}")
+        return []
+
+    # attach metadata
+    enriched = []
+    for r in raw_results:
+        rows = df[df["coffee_name"] == r["name"]]
+        if len(rows) == 0:
+            continue
+        roast = rows.iloc[0]["roast_level"]
+        if roast_level != "All" and roast.lower() != roast_level.lower():
+            continue
+        label, css_class, description = get_risk_label(r["variance"])
+        enriched.append({
+            **r,
+            "roast_level":   roast,
+            "risk_label":    label,
+            "risk_class":    css_class,
+            "risk_desc":     description,
+            "top_review":    get_top_review(df, r["name"]),
+        })
+        if len(enriched) == top_k:
+            break
+
+    return enriched
+
+
 # ── Load once ──────────────────────────────────────────────────────────────────
 tokenizer, model, index, coffee_names, variance_scores, df = load_resources()
 
 ROAST_OPTIONS = ["All", "Light", "Medium-Light", "Medium", "Medium-Dark", "Dark", "Very Dark"]
+
+# ── Session state defaults ─────────────────────────────────────────────────────
+if "results" not in st.session_state:
+    st.session_state.results = []
+if "last_query" not in st.session_state:
+    st.session_state.last_query = ""
+if "last_roast" not in st.session_state:
+    st.session_state.last_roast = "All"
+if "last_top_k" not in st.session_state:
+    st.session_state.last_top_k = 5
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -255,66 +324,68 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-col_input, col_btn = st.columns([5, 1])
-with col_input:
-    query = st.text_input(
-        label="query",
-        placeholder="Describe your ideal cup — e.g. bright citrus floral light roast...",
-        label_visibility="collapsed"
+# ── Search form (Enter key submits) ───────────────────────────────────────────
+with st.form("search_form", clear_on_submit=False):
+    col_input, col_btn = st.columns([5, 1])
+    with col_input:
+        query = st.text_input(
+            label="query",
+            placeholder="Describe your ideal cup — e.g. bright citrus floral light roast...",
+            label_visibility="collapsed"
+        )
+    with col_btn:
+        search_clicked = st.form_submit_button("Search ☕", use_container_width=True)
+
+
+# ── Determine whether to search ───────────────────────────────────────────────
+should_search = False
+
+if search_clicked and query.strip():
+    should_search = True
+elif search_clicked and not query.strip():
+    st.warning("Please enter a flavor description to search.")
+elif st.session_state.last_query:
+    # Auto-re-search when filters change while we have a previous query
+    filters_changed = (
+        roast_level != st.session_state.last_roast or
+        top_k != st.session_state.last_top_k
     )
-with col_btn:
-    search_clicked = st.button("Search ☕", use_container_width=True)
+    if filters_changed:
+        query = st.session_state.last_query
+        should_search = True
 
 
 # ── Search & results ───────────────────────────────────────────────────────────
-if search_clicked and query.strip():
+if should_search:
     with st.spinner("Brewing your recommendations..."):
-        fetch_k = top_k * 3 if roast_level != "All" else top_k
-
-        raw_results = search(
+        enriched = run_search(
             query=query,
+            roast_level=roast_level,
+            top_k=top_k,
             tokenizer=tokenizer,
             model=model,
             index=index,
             coffee_names=coffee_names,
             variance_scores=variance_scores,
-            top_k=fetch_k,
+            df=df,
         )
 
-        # attach metadata
-        enriched = []
-        for r in raw_results:
-            rows = df[df["coffee_name"] == r["name"]]
-            if len(rows) == 0:
-                continue
-            roast = rows.iloc[0]["roast_level"]
-            if roast_level != "All" and roast.lower() != roast_level.lower():
-                continue
-            label, css_class, description = get_risk_label(r["variance"])
-            enriched.append({
-                **r,
-                "roast_level":   roast,
-                "risk_label":    label,
-                "risk_class":    css_class,
-                "risk_desc":     description,
-                "top_review":    get_top_review(df, r["name"]),
-            })
-            if len(enriched) == top_k:
-                break
+    # Persist in session state
+    st.session_state.results = enriched
+    st.session_state.last_query = query
+    st.session_state.last_roast = roast_level
+    st.session_state.last_top_k = top_k
 
-    if not enriched:
-        st.markdown("""
-<div class='empty-state'>
-  <div class='icon'>☕</div>
-  <p>No coffees matched your filters. Try a different roast level or broaden your query.</p>
-</div>
-""", unsafe_allow_html=True)
-    else:
-        # ── Result cards ──
-        st.markdown(f"<div class='section-title'>Top {len(enriched)} Matches</div>", unsafe_allow_html=True)
 
-        for r in enriched:
-            st.markdown(f"""
+# ── Display results (from session state) ───────────────────────────────────────
+enriched = st.session_state.results
+
+if enriched:
+    # ── Result cards ──
+    st.markdown(f"<div class='section-title'>Top {len(enriched)} Matches</div>", unsafe_allow_html=True)
+
+    for r in enriched:
+        st.markdown(f"""
 <div class='coffee-card'>
   <h3>{r['name'].title()}</h3>
   <span class='roast-tag'>{r['roast_level']} Roast</span>
@@ -333,62 +404,59 @@ if search_clicked and query.strip():
 </div>
 """, unsafe_allow_html=True)
 
-        # ── Charts ──
-        chart_df = pd.DataFrame(enriched)
-        chart_df["name_display"] = chart_df["name"].str.title().str[:28]
+    # ── Charts ──
+    chart_df = pd.DataFrame(enriched)
+    chart_df["name_display"] = chart_df["name"].str.title().str[:28]
 
-        st.markdown("<div class='section-title'>Visual Analysis</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Visual Analysis</div>", unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-        with col1:
-            fig_bar = px.bar(
-                chart_df,
-                x="score",
-                y="name_display",
-                orientation="h",
-                title="Similarity Scores",
-                color="score",
-                color_continuous_scale=["#E8D9C5", "#C68642", "#3B1F0E"],
-                labels={"score": "Similarity", "name_display": ""},
-            )
-            fig_bar.update_layout(
-                plot_bgcolor="#FDF8F0",
-                paper_bgcolor="#FDF8F0",
-                font_family="DM Sans",
-                coloraxis_showscale=False,
-                margin=dict(l=0, r=10, t=40, b=10),
-                title_font_family="Playfair Display",
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+    with col1:
+        fig_bar = px.bar(
+            chart_df,
+            x="score",
+            y="name_display",
+            orientation="h",
+            title="Similarity Scores",
+            color="score",
+            color_continuous_scale=["#E8D9C5", "#C68642", "#3B1F0E"],
+            labels={"score": "Similarity", "name_display": ""},
+        )
+        fig_bar.update_layout(
+            plot_bgcolor="#FDF8F0",
+            paper_bgcolor="#FDF8F0",
+            font_family="DM Sans",
+            coloraxis_showscale=False,
+            margin=dict(l=0, r=10, t=40, b=10),
+            title_font_family="Playfair Display",
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
 
-        with col2:
-            fig_scatter = px.scatter(
-                chart_df,
-                x="score",
-                y="variance",
-                text="name_display",
-                title="Similarity vs Risk",
-                color="variance",
-                color_continuous_scale=["#4A7C59", "#C68642", "#A63D2F"],
-                labels={"score": "Similarity", "variance": "Risk (Variance)"},
-                size=[12] * len(chart_df),
-            )
-            fig_scatter.update_traces(textposition="top center", textfont_size=9)
-            fig_scatter.update_layout(
-                plot_bgcolor="#FDF8F0",
-                paper_bgcolor="#FDF8F0",
-                font_family="DM Sans",
-                coloraxis_showscale=False,
-                margin=dict(l=0, r=10, t=40, b=10),
-                title_font_family="Playfair Display",
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
+    with col2:
+        fig_scatter = px.scatter(
+            chart_df,
+            x="score",
+            y="variance",
+            text="name_display",
+            title="Similarity vs Risk",
+            color="variance",
+            color_continuous_scale=["#4A7C59", "#C68642", "#A63D2F"],
+            labels={"score": "Similarity", "variance": "Risk (Variance)"},
+            size=[12] * len(chart_df),
+        )
+        fig_scatter.update_traces(textposition="top center", textfont_size=9)
+        fig_scatter.update_layout(
+            plot_bgcolor="#FDF8F0",
+            paper_bgcolor="#FDF8F0",
+            font_family="DM Sans",
+            coloraxis_showscale=False,
+            margin=dict(l=0, r=10, t=40, b=10),
+            title_font_family="Playfair Display",
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
-elif search_clicked and not query.strip():
-    st.warning("Please enter a flavor description to search.")
-
-else:
+elif not search_clicked:
     st.markdown("""
 <div class='empty-state'>
   <div class='icon'>☕</div>
